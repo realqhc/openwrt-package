@@ -1,0 +1,65 @@
+name: Update Argon packages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-argon-packages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'realqhc/openwrt-package'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Update Argon submodules
+        id: update
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          update_submodule() {
+            local path="$1"
+            local output_name="${path//-/_}_commit"
+
+            git -C "$path" fetch --prune origin master
+            git -C "$path" checkout --detach origin/master
+            echo "$output_name=$(git -C "$path" rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          }
+
+          update_submodule luci-theme-argon
+          update_submodule luci-app-argon-config
+
+          git add .gitmodules luci-theme-argon luci-app-argon-config
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Argon packages are already up to date."
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --cached --submodule=log
+
+      - name: Commit and push
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          git commit -m "Update Argon packages" \
+            -m "luci-theme-argon: ${{ steps.update.outputs.luci_theme_argon_commit }}" \
+            -m "luci-app-argon-config: ${{ steps.update.outputs.luci_app_argon_config_commit }}"
+          git push
